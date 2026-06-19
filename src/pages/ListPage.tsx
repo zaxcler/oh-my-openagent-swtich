@@ -1,25 +1,31 @@
 /**
- * 配置列表页 —— T12 核心页面。
+ * 配置列表页 —— T12 + T15。
  *
  * 职责：
  * - 加载配置列表 (`list_configs`) 和当前激活状态 (`get_active_status`)
  * - 渲染卡片列表，每张卡片显示 label / 更新时间 / 激活徽章
  * - 4 个操作：编辑 / 应用 / 导出 / 删除
- * - 空状态：从 opencode 一键导入
+ * - 空状态：通过 `<ImportFromOpencodeButton>` 一键导入
+ * - 应用成功后：通过 `<ApplyButton>` 回调触发 `<RestartPrompt>` 并刷新状态
  *
  * 设计要点：
  * - 全局状态用 `useConfigsStore` (T11)；
- * - 局部 state 仅承载"瞬时 UI"（确认对话框、busy 状态）；
+ * - 局部 state 仅承载"瞬时 UI"（确认对话框、busy 状态、RestartPrompt 数据）；
  * - 所有 Tauri 调用集中在本页，`apiKey` 永不进入 DOM。
+ * - T15 拆分：`ApplyButton` / `ImportFromOpencodeButton` / `RestartPrompt` 独立组件
+ *   仅暴露必要 props；本页面负责编排（编排后立即 useEffect 拉新数据）。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import ApplyButton from '@/components/ApplyButton';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import ImportFromOpencodeButton from '@/components/ImportFromOpencodeButton';
+import RestartPrompt from '@/components/RestartPrompt';
 import { tauriInvoke } from '@/lib/tauri';
 import { useConfigsStore } from '@/store/configs';
-import type { ActiveStatus, ConfigMeta } from '@/types';
-import ConfirmDialog from '@/components/ConfirmDialog';
 import { showToast } from '@/store/toast';
+import type { ActiveStatus, ApplyResult, Config, ConfigMeta } from '@/types';
 
 // ---------------------------------------------------------------------------
 // 激活徽章
@@ -114,9 +120,13 @@ export default function ListPage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ConfigMeta | null>(null);
-  const [importing, setImporting] = useState(false);
+  // T15: RestartPrompt 数据
+  const [restartPrompt, setRestartPrompt] = useState<{
+    open: boolean;
+    backupFiles: string[];
+  }>({ open: false, backupFiles: [] });
 
-  // ----- 加载 -----
+  // ----- 加载 + 刷新 -----
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -138,28 +148,36 @@ export default function ListPage() {
     void load();
   }, [load]);
 
-  // ----- 操作：应用 -----
+  /**
+   * 应用成功后拉取最新状态（list + activeStatus）。
+   * 抽出来供 ApplyButton 的 onApplied 回调复用。
+   */
+  const refreshStatus = useCallback(async () => {
+    const list = await tauriInvoke<ConfigMeta[]>('list_configs');
+    setConfigs(list);
+    const status = await tauriInvoke<ActiveStatus>('get_active_status', {
+      configs: list,
+    });
+    setActiveStatus(status);
+  }, [setConfigs, setActiveStatus]);
 
-  const handleApply = useCallback(
-    async (meta: ConfigMeta) => {
-      setBusyId(meta.id);
+  // ----- 操作：应用（编排层） -----
+
+  const handleApplied = useCallback(
+    async (result: ApplyResult) => {
+      // 刷新列表 + activeStatus（其它徽章可能也会变）
       try {
-        await tauriInvoke('apply_config', { id: meta.id });
-        // 重新查询 active status（其它徽章可能也会变）
-        const list = await tauriInvoke<ConfigMeta[]>('list_configs');
-        setConfigs(list);
-        const status = await tauriInvoke<ActiveStatus>('get_active_status', {
-          configs: list,
-        });
-        setActiveStatus(status);
-        showToast(`已应用：${meta.label}`, 'success');
+        await refreshStatus();
       } catch (err) {
-        showToast(`应用失败：${String(err)}`, 'error');
-      } finally {
-        setBusyId(null);
+        showToast(`状态刷新失败：${String(err)}`, 'error');
       }
+      // 弹重启提示（即使 backupFiles 为空也弹）
+      setRestartPrompt({
+        open: true,
+        backupFiles: result.backup_files,
+      });
     },
-    [setConfigs, setActiveStatus],
+    [refreshStatus],
   );
 
   // ----- 操作：导出 -----
@@ -210,28 +228,22 @@ export default function ListPage() {
     }
   }, [pendingDelete, removeConfig, setConfigs, setActiveStatus]);
 
-  // ----- 操作：从 opencode 一键导入 -----
+  // ----- 操作：从 opencode 一键导入（编排层） -----
 
-  const handleImport = useCallback(async () => {
-    setImporting(true);
-    try {
-      const created = await tauriInvoke<ConfigMeta | null>(
-        'import_from_opencode',
-      );
-      if (!created) {
-        showToast('当前 opencode.jsonc 没有可导入的 provider.omos 块', 'error');
-        return;
-      }
-      // 后端命令返回完整 Config，但 store 只需要 meta；用同一命令回拉以保持单一数据源
-      await load();
-      upsertConfig(created);
-      showToast(`已导入：${created.label}`, 'success');
-    } catch (err) {
-      showToast(`导入失败：${String(err)}`, 'error');
-    } finally {
-      setImporting(false);
-    }
-  }, [load, upsertConfig]);
+  const handleImported = useCallback(
+    (config: Config) => {
+      // 把 meta 注入 store（store 只存 meta，full Config 通过 get_config 拿）
+      upsertConfig({
+        id: config.id,
+        label: config.label,
+        updated_at: config.updated_at,
+      });
+      showToast(`已导入：${config.label}`, 'success');
+      // 跳转到编辑页，让用户继续填 agents / categories
+      navigate(`/edit/${config.id}`);
+    },
+    [upsertConfig, navigate],
+  );
 
   // ----- 渲染辅助 -----
 
@@ -256,14 +268,7 @@ export default function ListPage() {
               opencode.jsonc 一键导入。
             </p>
             <div className="card-actions mt-2">
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={handleImport}
-                disabled={importing}
-              >
-                {importing ? '导入中…' : '从 opencode 导入'}
-              </button>
+              <ImportFromOpencodeButton onSuccess={handleImported} />
             </div>
           </div>
         </div>
@@ -320,15 +325,12 @@ export default function ListPage() {
                       >
                         编辑
                       </button>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => void handleApply(meta)}
-                        disabled={busy}
-                        title="应用此配置到 opencode 环境"
-                      >
-                        {busy && busyId === meta.id ? '应用中…' : '应用'}
-                      </button>
+                      <ApplyButton
+                        configId={meta.id}
+                        label={meta.label}
+                        onApplied={handleApplied}
+                        busy={busy}
+                      />
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
@@ -369,6 +371,13 @@ export default function ListPage() {
         variant="danger"
         onConfirm={() => void handleConfirmDelete()}
         onCancel={() => setPendingDelete(null)}
+      />
+
+      {/* ----- 应用成功后的重启提示 ----- */}
+      <RestartPrompt
+        open={restartPrompt.open}
+        backupFiles={restartPrompt.backupFiles}
+        onClose={() => setRestartPrompt({ open: false, backupFiles: [] })}
       />
     </section>
   );

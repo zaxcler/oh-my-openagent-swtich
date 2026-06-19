@@ -201,6 +201,32 @@ pub fn restore_backup(backup_filename: &str) -> Result<(), AppError> {
     atomic_write_json(&target, &value)
 }
 
+/// 删除指定备份文件（含 `.original_path` 侧车文件）
+///
+/// - 文件不存在 → `FileNotFound`
+/// - 删除主文件后顺手清理侧车
+pub fn delete_backup(backup_filename: &str) -> Result<(), AppError> {
+    let dir = effective_backups_dir()?;
+    let backup_path = dir.join(backup_filename);
+    if !backup_path.exists() {
+        return Err(AppError::FileNotFound {
+            path: backup_path.to_string_lossy().to_string(),
+        });
+    }
+
+    fs::remove_file(&backup_path).map_err(|e| AppError::IoError {
+        message: format!("删除备份失败 {}: {}", backup_path.display(), e),
+    })?;
+
+    let sidecar = sidecar_path_for(&backup_path);
+    if sidecar.exists() {
+        // 侧车删除失败不视为致命错误（主文件已删）
+        let _ = fs::remove_file(&sidecar);
+    }
+
+    Ok(())
+}
+
 /// 保留最近 `keep` 个备份，删除更早的
 pub fn prune_old_backups(keep: usize) -> Result<(), AppError> {
     let mut backups = list_backups()?;
@@ -360,6 +386,33 @@ mod tests {
             assert!(result.is_err());
             let err = result.unwrap_err();
             assert!(matches!(err, AppError::FileNotFound { .. }));
+        });
+    }
+
+    #[test]
+    fn test_delete_backup_removes_file_and_sidecar() {
+        with_backups_dir(|_dir| {
+            let source_dir = TempDir::new().unwrap();
+            let source_path = write_source(source_dir.path(), "config.json", "x");
+
+            let backup_path = backup_file(&source_path).unwrap();
+            let filename = backup_path.file_name().unwrap().to_str().unwrap().to_string();
+            let sidecar = sidecar_path_for(&backup_path);
+            assert!(backup_path.exists());
+            assert!(sidecar.exists());
+
+            delete_backup(&filename).unwrap();
+            assert!(!backup_path.exists());
+            assert!(!sidecar.exists());
+        });
+    }
+
+    #[test]
+    fn test_delete_backup_missing() {
+        with_backups_dir(|_dir| {
+            let result = delete_backup("non-existent.json");
+            assert!(result.is_err());
+            assert!(matches!(result.unwrap_err(), AppError::FileNotFound { .. }));
         });
     }
 

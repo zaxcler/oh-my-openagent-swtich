@@ -32,6 +32,7 @@ pub fn run() {
             commands::export_config,
             commands::list_backups,
             commands::restore_backup,
+            commands::delete_backup,
             commands::get_active_status,
         ])
         .run(tauri::generate_context!())

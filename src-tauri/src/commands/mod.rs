@@ -18,7 +18,7 @@ use crate::config::{build_oh_my_openagent, merge_opencode};
 use crate::error::AppError;
 use crate::storage::active::{ActiveRecord, Fingerprints, write_active};
 use crate::storage::atomic::atomic_write_json;
-use crate::storage::backup::{backup_file, list_backups as list_backup_items, restore_backup as restore_backup_item, BackupMeta};
+use crate::storage::backup::{backup_file, delete_backup as delete_backup_item, list_backups as list_backup_items, restore_backup as restore_backup_item, BackupMeta};
 use crate::storage::configs::{
     Config, ConfigMeta, ConfigPayload,
 };
@@ -233,6 +233,12 @@ pub fn list_backups() -> Result<Vec<BackupMeta>, AppError> {
 #[tauri::command]
 pub fn restore_backup(filename: String) -> Result<(), AppError> {
     restore_backup_item(&filename)
+}
+
+/// 删除指定备份文件（含侧车）
+#[tauri::command]
+pub fn delete_backup(filename: String) -> Result<(), AppError> {
+    delete_backup_item(&filename)
 }
 
 // ---------------------------------------------------------------------------
