@@ -400,7 +400,7 @@ mod integration_tests {
         assert!(result.opencode_updated);
         assert!(result.omos_updated);
         assert!(result.applied_at <= chrono::Utc::now());
-        assert!(result.backup_files.len() >= 1);
+        assert!(!result.backup_files.is_empty());
 
         // 验证 opencode.jsonc 被修改
         let new_content = fs::read_to_string(&opencode_path).unwrap();
