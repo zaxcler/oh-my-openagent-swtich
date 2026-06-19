@@ -4,15 +4,20 @@
   "version": "0.1.0",
   "identifier": "com.zaxcler.oh-my-openagent-switch",
   "build": {
-    "frontendDist": "../src"
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "title": "oh-my-openagent-switch",
-        "width": 800,
-        "height": 600
+        "width": 1024,
+        "height": 720,
+        "minWidth": 720,
+        "minHeight": 480
       }
     ],
     "security": {
