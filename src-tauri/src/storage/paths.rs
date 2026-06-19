@@ -27,6 +27,19 @@ fn app_config_root() -> Result<PathBuf, AppError> {
 /// - Linux: `~/.config/oh-my-openagent-switch/configs/`
 /// - Windows: `%APPDATA%\oh-my-openagent-switch\configs\`
 pub fn configs_dir() -> Result<PathBuf, AppError> {
+    configs_dir_with_override(None)
+}
+
+/// 获取 configs 目录路径，支持测试环境覆盖
+///
+/// - `override`: 传入 `Some(path)` 时直接使用，常用于测试
+pub fn configs_dir_with_override(override_path: Option<PathBuf>) -> Result<PathBuf, AppError> {
+    if let Some(p) = override_path {
+        return Ok(p);
+    }
+    if let Ok(env_path) = std::env::var("OMO_TEST_CONFIGS_DIR") {
+        return Ok(PathBuf::from(env_path));
+    }
     Ok(app_config_root()?.join("configs"))
 }
 
