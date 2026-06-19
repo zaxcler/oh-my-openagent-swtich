@@ -1,5 +1,5 @@
 mod fingerprint;
-mod jsonc;
+pub mod jsonc;
 mod merge;
 
 pub use fingerprint::fingerprint;

@@ -10,8 +10,7 @@ use crate::error::AppError;
 use crate::storage::paths::configs_dir;
 
 thread_local! {
-    #[cfg(test)]
-    static TEST_CONFIGS_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_CONFIGS_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
 }
 
 fn effective_configs_dir() -> Result<PathBuf, AppError> {
