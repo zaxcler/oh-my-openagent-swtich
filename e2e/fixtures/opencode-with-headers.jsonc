@@ -1,0 +1,30 @@
+{
+  "plugin": ["some-plugin-1", "some-plugin-2"],
+  "permission": {
+    "bash": "allow",
+    "edit": "deny"
+  },
+  "provider": {
+    "omos": {
+      "name": "old-provider",
+      "npm": "@old/plugin",
+      "options": {
+        "apiKey": "old-key",
+        "baseURL": "https://old.example.com"
+      },
+      "models": {
+        "gpt-4o": {
+          "name": "old-gpt-4o",
+          "headers": {
+            "X-Custom-Auth": "keep-me",
+            "X-Region": "us-east-1"
+          },
+          "limit": {
+            "context": 128000,
+            "output": 8192
+          }
+        }
+      }
+    }
+  }
+}

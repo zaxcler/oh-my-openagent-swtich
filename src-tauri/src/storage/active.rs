@@ -44,6 +44,11 @@ fn effective_active_file() -> Result<PathBuf, AppError> {
             return Ok(path);
         }
     }
+    if let Ok(env_path) = std::env::var("OMO_TEST_ACTIVE_FILE") {
+        if !env_path.is_empty() {
+            return Ok(PathBuf::from(env_path));
+        }
+    }
     active_file()
 }
 

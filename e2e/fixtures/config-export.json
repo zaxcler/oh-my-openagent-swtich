@@ -1,0 +1,23 @@
+{
+  "label": "imported-fixture",
+  "provider": {
+    "name": "openai",
+    "npm": "@ai-sdk/openai-compatible",
+    "options": {
+      "api_key": "sk-fixture-key",
+      "base_url": "https://api.openai.com/v1"
+    },
+    "models": {
+      "gpt-4o": {
+        "name": "gpt-4o",
+        "group": "default"
+      }
+    }
+  },
+  "agents": {
+    "coder": "omos/gpt-4o"
+  },
+  "categories": {
+    "default": "omos/gpt-4o"
+  }
+}

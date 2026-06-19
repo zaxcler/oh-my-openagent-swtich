@@ -61,6 +61,11 @@ pub fn opencode_dir() -> Result<PathBuf, AppError> {
             return Ok(path);
         }
     }
+    if let Ok(env_path) = std::env::var("OMO_TEST_OPENCODE_DIR") {
+        if !env_path.is_empty() {
+            return Ok(PathBuf::from(env_path));
+        }
+    }
     dirs::config_dir()
         .map(|p| p.join("opencode"))
         .ok_or(AppError::OpencodeNotFound)
