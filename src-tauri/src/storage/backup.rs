@@ -54,6 +54,8 @@ pub struct BackupMeta {
     /// 备份文件字节数
     pub size_bytes: u64,
 }
+/// Vec<BackupMeta> type alias
+pub type BackupMetaVec = Vec<BackupMeta>;
 
 fn sidecar_path_for(backup_path: &Path) -> PathBuf {
     let mut name = backup_path
@@ -118,7 +120,8 @@ pub fn backup_file(path: &Path) -> Result<PathBuf, AppError> {
 }
 
 /// 列出所有备份，按 `created_at` 降序
-pub fn list_backups() -> Result<Vec<BackupMeta>, AppError> {
+pub fn list_backups() -> Result<BackupMetaVec, AppError> {
+
     let dir = effective_backups_dir()?;
     if !dir.exists() {
         return Ok(Vec::new());
