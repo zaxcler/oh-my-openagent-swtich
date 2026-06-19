@@ -1,8 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
-import App from '@/App';
+import { RouterProvider } from 'react-router-dom';
 import Layout from '@/components/Layout';
+import { ToastContainer } from '@/components/Toast';
+import { router } from '@/router';
 import '@/index.css';
 
 const rootEl = document.getElementById('root');
@@ -12,10 +13,9 @@ if (!rootEl) {
 
 ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <Layout>
-        <App />
-      </Layout>
-    </BrowserRouter>
+    <Layout>
+      <RouterProvider router={router} />
+    </Layout>
+    <ToastContainer />
   </React.StrictMode>,
 );
