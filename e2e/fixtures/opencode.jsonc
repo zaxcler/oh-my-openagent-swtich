@@ -1,0 +1,15 @@
+{
+  "provider": {
+    "omos": {
+      "name": "Test Provider",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-test-key",
+        "baseURL": "http://localhost:3000/v1"
+      },
+      "models": {
+        "test-model": { "name": "test-model", "group": "default" }
+      }
+    }
+  }
+}
