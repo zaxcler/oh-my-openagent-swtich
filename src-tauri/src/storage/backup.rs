@@ -20,7 +20,7 @@ use crate::storage::paths::backups_dir;
 
 thread_local! {
     #[cfg(test)]
-    static TEST_BACKUPS_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    pub(crate) static TEST_BACKUPS_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
 fn effective_backups_dir() -> Result<PathBuf, AppError> {

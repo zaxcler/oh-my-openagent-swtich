@@ -1,15 +1,11 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use tauri::Manager;
 
+pub mod commands;
 pub mod config;
 pub mod error;
 pub mod storage;
 pub use error::AppError;
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -24,7 +20,20 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![
+            commands::list_configs,
+            commands::get_config,
+            commands::create_config,
+            commands::update_config,
+            commands::delete_config,
+            commands::apply_config,
+            commands::import_from_opencode,
+            commands::import_config_file,
+            commands::export_config,
+            commands::list_backups,
+            commands::restore_backup,
+            commands::get_active_status,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
