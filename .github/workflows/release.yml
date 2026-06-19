@@ -1,20 +1,75 @@
 name: Release
+
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
 jobs:
-  tauri:
+  build:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          - platform: macos-latest
+            args: --bundles app,dmg
+            artifact_pattern: "*.{app,dmg}"
+          - platform: ubuntu-latest
+            args: --bundles deb,appimage
+            artifact_pattern: "*.{deb,AppImage}"
+          - platform: windows-latest
+            args: --bundles msi,nsis
+            artifact_pattern: "*.{msi,nsis}"
+
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v1
-      - run: bun install
-      - uses: tauri-apps/tauri-action@v0
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: v__VERSION__
-          releaseName: v__VERSION__
-          args: --bundles app,dmg,msi,nsis,deb,appimage
+          releaseName: 'v__VERSION__'
+          args: ${{ matrix.args }}
+
+      - name: Upload macOS artifacts
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/app/*.app
+          retention-days: 30
+
+      - name: Upload Linux artifacts
+        if: matrix.platform == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          retention-days: 30
+
+      - name: Upload Windows artifacts
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.nsis
+          retention-days: 30
