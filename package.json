@@ -1,0 +1,18 @@
+{
+  "name": "oh-my-openagent-switch",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "lint": "eslint . --ext ts,tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "e2e": "playwright test",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
