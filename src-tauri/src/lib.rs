@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use tauri::Manager;
 
+pub mod config;
 pub mod error;
 pub mod storage;
 pub use error::AppError;
