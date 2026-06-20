@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { showToast } from '@/store/toast';
 import type { ApplyResult } from '@/types';
-import { getRestartCommand } from '@/lib/restart-cmd';
+import { getRestartCommand } from '@/lib/process-check';
 
 export interface ApplyResultDialogProps {
   open: boolean;

@@ -7,8 +7,7 @@
  * - `/backups`       备份管理页（T14）
  * - `*`              兜底跳回列表
  *
- * 路由定义集中在 `createBrowserRouter`（React Router v6 data router），
- * 后续 T15+ 如需 loader/action 可平滑叠加，不会改变入口签名。
+ * Layout 在 main.tsx 中统一包裹（顶部栏 + 主区），路由只负责页面内容。
  */
 import { createBrowserRouter } from 'react-router-dom';
 import ListPage from '@/pages/ListPage';

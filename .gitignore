@@ -17,6 +17,14 @@ target/
 src-tauri/target/
 src-tauri/.tauri*/
 
+# Playwright
+test-results/
+playwright-report/
+.playwright-mcp/
+
+# OMO workspace
+.omo/
+
 # Env files
 .env
 .env.*
