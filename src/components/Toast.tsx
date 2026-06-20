@@ -20,11 +20,13 @@ const AUTO_DISMISS_MS = 3000;
 const variantClasses: Record<ToastVariant, string> = {
   success: 'alert-success',
   error: 'alert-error',
+  warning: 'alert-warning',
 };
 
 const variantIcon: Record<ToastVariant, string> = {
   success: '✓',
   error: '✕',
+  warning: '!',
 };
 
 interface ToastProps {

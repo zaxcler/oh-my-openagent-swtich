@@ -254,16 +254,37 @@ export default function EditPage() {
     if (submitting) return;
     setSubmitting(true);
     try {
-      // 兜底：用户清空所有 role 时回填第一个 model（保证 Rust 端不会收到空字符串）
       const firstModelId = data.provider.models[0]?.id;
       const fallback = firstModelId ? toOption(firstModelId) : '';
+      const options = new Set(modelOptions);
+
+      const reconcile = (v: string): { value: string; fixed: boolean } => {
+        if (!v) return { value: fallback, fixed: !!fallback };
+        if (options.has(v)) return { value: v, fixed: false };
+        return { value: fallback, fixed: !!fallback };
+      };
+
       const safeAgents: Record<string, string> = {};
+      const fixedAgents: string[] = [];
       for (const key of AGENT_KEYS) {
-        safeAgents[key] = data.agents[key] || fallback;
+        const r = reconcile(data.agents[key]);
+        safeAgents[key] = r.value;
+        if (r.fixed) fixedAgents.push(key);
       }
       const safeCategories: Record<string, string> = {};
+      const fixedCategories: string[] = [];
       for (const key of CATEGORY_KEYS) {
-        safeCategories[key] = data.categories[key] || fallback;
+        const r = reconcile(data.categories[key]);
+        safeCategories[key] = r.value;
+        if (r.fixed) fixedCategories.push(key);
+      }
+
+      if (firstModelId && (fixedAgents.length > 0 || fixedCategories.length > 0)) {
+        const fixedKeys = [...fixedAgents, ...fixedCategories].map((k) => `「${k}」`).join('、');
+        showToast(
+          `已将 ${fixedKeys} 重置为 ${firstModelId}（引用了已删除/重命名的 model）`,
+          'warning',
+        );
       }
 
       const payload: ConfigPayload = {
