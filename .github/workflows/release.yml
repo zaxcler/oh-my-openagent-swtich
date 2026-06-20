@@ -22,8 +22,6 @@ jobs:
         include:
           - platform: macos-latest
             bundles: app,dmg
-          - platform: macos-13
-            bundles: app,dmg
           - platform: ubuntu-22.04
             bundles: deb,appimage
           - platform: windows-latest
