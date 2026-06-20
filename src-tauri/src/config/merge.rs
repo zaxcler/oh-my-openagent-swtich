@@ -7,10 +7,7 @@
 //!
 //! `provider.omos` 块内：
 //! - `name` / `npm` / `options`：整体替换
-//! - `models`：深度合并；相同 model id 仅覆盖 `name` / `group`，保留
-//!   `headers` / `limit` / `whitelist` / `attachment` / `cost` / `modalities` /
-//!   `experimental` / `provider` 等用户已配置字段
-//! - 不删除 target 中多余的 model（保守策略）
+//! - `models`：全量替换，只保留 source 中的 models（不保留 target 已有 model）
 //!
 //! `build_oh_my_openagent` 是整体替换式构建：直接产出完整的
 //! `oh-my-openagent.json` Value，不再与磁盘现有内容做合并。
@@ -20,7 +17,7 @@ use std::collections::HashMap;
 use serde_json::{json, Map, Value};
 
 use crate::error::AppError;
-use crate::storage::configs::{ConfigPayload, ModelEntry, ProviderOptions};
+use crate::storage::configs::{ConfigPayload, ProviderOptions};
 
 /// 固定 $schema 引用地址
 const OH_MY_OPENCODE_SCHEMA: &str =
@@ -59,19 +56,15 @@ pub fn merge_opencode(target: &mut Value, source: &ConfigPayload) -> Result<(), 
     omos_block.insert("npm".to_string(), Value::String(source.provider.npm.clone()));
     omos_block.insert("options".to_string(), build_options_value(&source.provider.options));
 
-    // models 深度合并：先取 target 中已有 model（保留未知字段），再叠加 source
+    // models 全量替换（不保留 target 已有 model）
     let mut models_map = Map::new();
-    if let Some(existing_models) = providers
-        .get("omos")
-        .and_then(|v| v.get("models"))
-        .and_then(|v| v.as_object())
-    {
-        for (model_id, existing_value) in existing_models {
-            models_map.insert(model_id.clone(), existing_value.clone());
-        }
-    }
     for (model_id, entry) in &source.provider.models {
-        merge_single_model(&mut models_map, model_id, entry);
+        let mut obj = Map::new();
+        obj.insert("name".to_string(), Value::String(entry.name.clone()));
+        if let Some(group) = &entry.group {
+            obj.insert("group".to_string(), Value::String(group.clone()));
+        }
+        models_map.insert(model_id.clone(), Value::Object(obj));
     }
     omos_block.insert("models".to_string(), Value::Object(models_map));
 
@@ -104,17 +97,29 @@ pub fn merge_opencode(target: &mut Value, source: &ConfigPayload) -> Result<(), 
 ///
 /// model 引用固定用 `omos/` 前缀（与 opencode.jsonc 中的 `provider.omos` 对应）。
 pub fn build_oh_my_openagent(payload: &ConfigPayload) -> Value {
+    let case_map: HashMap<String, String> = payload
+        .provider
+        .models
+        .keys()
+        .map(|k| (k.to_lowercase(), k.clone()))
+        .collect();
+
+    fn omos_ref(v: &str, case_map: &HashMap<String, String>) -> String {
+        let model_id = v.rsplit('/').next().unwrap_or(v);
+        let resolved = case_map
+            .get(&model_id.to_lowercase())
+            .cloned()
+            .unwrap_or_else(|| model_id.to_string());
+        format!("{}/{}", OMOS_NPM, resolved)
+    }
+
     let mut agents = Map::new();
     for (k, v) in &payload.agents {
-        let model_id = extract_model_id(v);
-        let model_ref = format!("{}/{}", OMOS_NPM, model_id);
-        agents.insert(k.clone(), json!({ "model": model_ref }));
+        agents.insert(k.clone(), json!({ "model": omos_ref(v, &case_map) }));
     }
     let mut categories = Map::new();
     for (k, v) in &payload.categories {
-        let model_id = extract_model_id(v);
-        let model_ref = format!("{}/{}", OMOS_NPM, model_id);
-        categories.insert(k.clone(), json!({ "model": model_ref }));
+        categories.insert(k.clone(), json!({ "model": omos_ref(v, &case_map) }));
     }
     json!({
         "$schema": OH_MY_OPENCODE_SCHEMA,
@@ -123,55 +128,12 @@ pub fn build_oh_my_openagent(payload: &ConfigPayload) -> Value {
     })
 }
 
-/// 从前端传入的 value 中提取 model id。
-/// 前端 RoleSelect 的 value 可能是 "omos/xxx" 或纯 "xxx"。
-fn extract_model_id(value: &str) -> &str {
-    value.rsplit('/').next().unwrap_or(value)
-}
-
 fn build_options_value(opts: &ProviderOptions) -> Value {
     json!({
         "apiKey": opts.api_key,
         "baseURL": opts.base_url,
     })
 }
-
-/// 合并单个 model entry：仅覆盖 `name`，group 在 source 提供时替换，否则保留 target 原值（保守策略）
-fn merge_single_model(
-    models: &mut Map<String, Value>,
-    model_id: &str,
-    entry: &ModelEntry,
-) {
-    match models.get_mut(model_id) {
-        None => {
-            let mut obj = Map::new();
-            obj.insert("name".to_string(), Value::String(entry.name.clone()));
-            if let Some(group) = &entry.group {
-                obj.insert("group".to_string(), Value::String(group.clone()));
-            }
-            models.insert(model_id.to_string(), Value::Object(obj));
-        }
-        Some(existing) => {
-            let Some(obj) = existing.as_object_mut() else {
-                let mut new_obj = Map::new();
-                new_obj.insert("name".to_string(), Value::String(entry.name.clone()));
-                if let Some(group) = &entry.group {
-                    new_obj.insert("group".to_string(), Value::String(group.clone()));
-                }
-                *existing = Value::Object(new_obj);
-                return;
-            };
-            obj.insert("name".to_string(), Value::String(entry.name.clone()));
-            if let Some(group) = &entry.group {
-                obj.insert("group".to_string(), Value::String(group.clone()));
-            }
-        }
-    }
-}
-
-/// 抑制未使用导入告警（保留供后续 build 端到端测试时直接使用）
-#[allow(dead_code)]
-fn _hashmap_marker(_: &HashMap<String, String>) {}
 
 #[cfg(test)]
 mod tests {
@@ -214,130 +176,7 @@ mod tests {
         }
     }
 
-    // ---------- 1. target.m1 有 headers → 保留 ----------
-    #[test]
-    fn test_merge_preserves_target_model_headers() {
-        let mut target = json!({
-            "provider": {
-                "omos": {
-                    "name": "old",
-                    "npm": "old-npm",
-                    "options": {"apiKey": "old-key", "baseURL": "https://old.example.com"},
-                    "models": {
-                        "m1": {
-                            "name": "old-m1-name",
-                            "headers": {"X-Custom": "keep-me"}
-                        }
-                    }
-                }
-            }
-        });
-        let source = payload_with_one_model(
-            "OpenAI", "@ai-sdk/openai", "new-key", "https://new.example.com",
-            "m1", "new-m1-name", None,
-        );
-
-        merge_opencode(&mut target, &source).unwrap();
-
-        let m1 = &target["provider"]["omos"]["models"]["m1"];
-        assert_eq!(m1["name"], "new-m1-name", "name 应被 source 覆盖");
-        assert_eq!(
-            m1["headers"]["X-Custom"], "keep-me",
-            "target 中 headers 必须保留"
-        );
-    }
-
-    // ---------- 2. target.m1 有 limit → 保留 ----------
-    #[test]
-    fn test_merge_preserves_target_model_limit() {
-        let mut target = json!({
-            "provider": {
-                "omos": {
-                    "name": "old",
-                    "npm": "old-npm",
-                    "options": {"apiKey": "k", "baseURL": "u"},
-                    "models": {
-                        "m1": {
-                            "name": "old-m1",
-                            "limit": {"context": 128000, "output": 8192}
-                        }
-                    }
-                }
-            }
-        });
-        let source = payload_with_one_model(
-            "OpenAI", "@ai-sdk/openai", "k", "u", "m1", "new-m1", None,
-        );
-
-        merge_opencode(&mut target, &source).unwrap();
-
-        let m1 = &target["provider"]["omos"]["models"]["m1"];
-        assert_eq!(m1["name"], "new-m1");
-        assert_eq!(m1["limit"]["context"], 128000, "limit 必须保留");
-        assert_eq!(m1["limit"]["output"], 8192);
-    }
-
-    // ---------- 3. target.m1 有 group → 保留 ----------
-    #[test]
-    fn test_merge_preserves_target_model_group() {
-        let mut target = json!({
-            "provider": {
-                "omos": {
-                    "name": "old",
-                    "npm": "old-npm",
-                    "options": {"apiKey": "k", "baseURL": "u"},
-                    "models": {
-                        "m1": {
-                            "name": "old-m1",
-                            "group": "keep-this-group"
-                        }
-                    }
-                }
-            }
-        });
-        let source = payload_with_one_model(
-            "OpenAI", "@ai-sdk/openai", "k", "u", "m1", "new-m1", None,
-        );
-
-        merge_opencode(&mut target, &source).unwrap();
-
-        let m1 = &target["provider"]["omos"]["models"]["m1"];
-        assert_eq!(m1["name"], "new-m1");
-        assert_eq!(
-            m1["group"], "keep-this-group",
-            "source 未给 group 时必须保留 target 原 group"
-        );
-    }
-
-    // ---------- 4. target 有 m1+m2，source 只有 m1 → 保留 m2（保守） ----------
-    #[test]
-    fn test_merge_keeps_extra_models_in_target() {
-        let mut target = json!({
-            "provider": {
-                "omos": {
-                    "name": "old",
-                    "npm": "old-npm",
-                    "options": {"apiKey": "k", "baseURL": "u"},
-                    "models": {
-                        "m1": {"name": "m1-name"},
-                        "m2": {"name": "m2-name", "headers": {"X-Keep": "yes"}}
-                    }
-                }
-            }
-        });
-        let source = payload_with_one_model(
-            "OpenAI", "@ai-sdk/openai", "k", "u", "m1", "m1-new", None,
-        );
-
-        merge_opencode(&mut target, &source).unwrap();
-
-        let models = &target["provider"]["omos"]["models"];
-        assert_eq!(models["m1"]["name"], "m1-new");
-        assert_eq!(models["m2"]["name"], "m2-name", "target.m2 不能被删除");
-        assert_eq!(models["m2"]["headers"]["X-Keep"], "yes");
-    }
-
-    // ---------- 5. options 整块替换 ----------
+    // ---------- 1. options 整块替换 ----------
     #[test]
     fn test_merge_options_full_replace() {
         let mut target = json!({
@@ -370,7 +209,7 @@ mod tests {
         );
     }
 
-    // ---------- 6. target 有 anthropic provider → 替换时删除，只保留 omos ----------
+    // ---------- 2. target 有 anthropic provider → 替换时删除，只保留 omos ----------
     #[test]
     fn test_merge_removes_other_providers() {
         let mut target = json!({
@@ -402,7 +241,7 @@ mod tests {
         assert_eq!(providers["omos"]["name"], "OpenAI");
     }
 
-    // ---------- 7. target 有 $schema → 保留 ----------
+    // ---------- 3. target 有 $schema → 保留 ----------
     #[test]
     fn test_merge_preserves_schema() {
         let mut target = json!({
@@ -428,7 +267,7 @@ mod tests {
         );
     }
 
-    // ---------- 8. target 有 plugin → 保留 ----------
+    // ---------- 4. target 有 plugin → 保留 ----------
     #[test]
     fn test_merge_preserves_plugin() {
         let mut target = json!({
@@ -454,7 +293,7 @@ mod tests {
         assert_eq!(plugin[1], "some-plugin-2");
     }
 
-    // ---------- 9. target 有 permission → 保留 ----------
+    // ---------- 5. target 有 permission → 保留 ----------
     #[test]
     fn test_merge_preserves_permission() {
         let mut target = json!({
@@ -479,7 +318,37 @@ mod tests {
         assert_eq!(perm["edit"], "deny");
     }
 
-    // ---------- 10. source == target 时值不变 ----------
+    // ---------- 6. models 全量替换：target-only model 被移除 ----------
+    #[test]
+    fn test_merge_models_full_replacement() {
+        let mut target = json!({
+            "provider": {
+                "omos": {
+                    "name": "old",
+                    "npm": "old-npm",
+                    "options": {"apiKey": "k", "baseURL": "u"},
+                    "models": {
+                        "m1": {"name": "target-only-model"},
+                        "m2": {"name": "m2-with-extra", "headers": {"X": "y"}}
+                    }
+                }
+            }
+        });
+        let source = payload_with_one_model(
+            "OpenAI", "@ai-sdk/openai", "k", "u", "new_m", "source-only-model", Some("g1"),
+        );
+
+        merge_opencode(&mut target, &source).unwrap();
+
+        let models = target["provider"]["omos"]["models"].as_object().unwrap();
+        assert_eq!(models.len(), 1, "应只有 1 个 model（source 的）");
+        assert!(models.get("m1").is_none(), "target-only m1 应被移除");
+        assert!(models.get("m2").is_none(), "target-only m2 应被移除");
+        assert_eq!(models["new_m"]["name"], "source-only-model");
+        assert_eq!(models["new_m"]["group"], "g1");
+    }
+
+    // ---------- 7. source == target 时值不变 ----------
     #[test]
     fn test_merge_identical_no_change() {
         let mut target = json!({
@@ -512,9 +381,9 @@ mod tests {
         assert_eq!(target, snapshot_before, "source 与 target 相同则结果应保持一致");
     }
 
-    // ---------- 11. source 新增 model → target 出现 ----------
+    // ---------- 8. source 仅有 m1，target 有 m1+m2 → 最终只有 m1 ----------
     #[test]
-    fn test_merge_adds_new_model() {
+    fn test_merge_removes_extra_target_models() {
         let mut target = json!({
             "provider": {
                 "omos": {
@@ -522,57 +391,25 @@ mod tests {
                     "npm": "old-npm",
                     "options": {"apiKey": "k", "baseURL": "u"},
                     "models": {
-                        "m1": {"name": "m1-name"}
+                        "m1": {"name": "m1-name"},
+                        "m2": {"name": "m2-name"}
                     }
                 }
             }
         });
         let source = payload_with_one_model(
-            "OpenAI", "@ai-sdk/openai", "k", "u", "m_new", "new-model", Some("g-new"),
+            "OpenAI", "@ai-sdk/openai", "k", "u", "m1", "m1-updated", None,
         );
 
         merge_opencode(&mut target, &source).unwrap();
 
-        let models = &target["provider"]["omos"]["models"];
-        assert_eq!(models["m1"]["name"], "m1-name", "原有 model 仍在");
-        assert_eq!(models["m_new"]["name"], "new-model", "新 model 应被加入");
-        assert_eq!(models["m_new"]["group"], "g-new");
+        let models = target["provider"]["omos"]["models"].as_object().unwrap();
+        assert_eq!(models.len(), 1, "target 多余的 m2 应被移除");
+        assert!(models.get("m2").is_none(), "m2 不应出现在 models 中");
+        assert_eq!(models["m1"]["name"], "m1-updated", "m1 name 被 source 覆盖");
     }
 
-    // ---------- 12. target.m1 有 experimental / modalities → 保留 ----------
-    #[test]
-    fn test_merge_preserves_unknown_fields() {
-        let mut target = json!({
-            "provider": {
-                "omos": {
-                    "name": "old",
-                    "npm": "old-npm",
-                    "options": {"apiKey": "k", "baseURL": "u"},
-                    "models": {
-                        "m1": {
-                            "name": "old-m1",
-                            "experimental": {"thinking": true},
-                            "modalities": {"input": ["text", "image"], "output": ["text"]},
-                            "provider": {"npm": "@custom/pkg"}
-                        }
-                    }
-                }
-            }
-        });
-        let source = payload_with_one_model(
-            "OpenAI", "@ai-sdk/openai", "k", "u", "m1", "new-m1", None,
-        );
-
-        merge_opencode(&mut target, &source).unwrap();
-
-        let m1 = &target["provider"]["omos"]["models"]["m1"];
-        assert_eq!(m1["name"], "new-m1");
-        assert_eq!(m1["experimental"]["thinking"], true, "experimental 必须保留");
-        assert_eq!(m1["modalities"]["input"][1], "image", "modalities 必须保留");
-        assert_eq!(m1["provider"]["npm"], "@custom/pkg", "provider 子字段必须保留");
-    }
-
-    // ---------- build_oh_my_openagent 基础 ----------
+    // ---------- build_oh_my_openagent：基础形状 + 大小写 + omos/ 前缀 ----------
     #[test]
     fn test_build_oh_my_openagent_basic_shape() {
         let mut agents = HashMap::new();
@@ -593,8 +430,83 @@ mod tests {
         let v = build_oh_my_openagent(&payload);
 
         assert_eq!(v["$schema"], OH_MY_OPENCODE_SCHEMA);
-        // model 引用固定用 omos/ 前缀，与 opencode.jsonc 的 provider.omos 对应
         assert_eq!(v["agents"]["coder"]["model"], "omos/gpt-4o");
         assert_eq!(v["categories"]["web"]["model"], "omos/claude-3");
+    }
+
+    // ---------- build_oh_my_openagent：保持原大小写（输入=输出一致） ----------
+    #[test]
+    fn test_build_oh_my_openagent_preserves_model_id_case() {
+        let mut agents = HashMap::new();
+        agents.insert("coder".to_string(), "omos/MiniMax-M3".to_string());
+        let payload = ConfigPayload {
+            label: "label".to_string(),
+            provider: ConfigProvider {
+                name: "MiniMax".to_string(),
+                ..ConfigProvider::default()
+            },
+            agents,
+            categories: HashMap::new(),
+            source: None,
+        };
+
+        let v = build_oh_my_openagent(&payload);
+
+        assert_eq!(v["agents"]["coder"]["model"], "omos/MiniMax-M3", "应保持原大小写，不做转换");
+    }
+
+    // ---------- build_oh_my_openagent：大小写归一化（用 provider.models 的精确大小写） ----------
+    #[test]
+    fn test_build_oh_my_openagent_normalizes_case_via_provider_models() {
+        let mut models = HashMap::new();
+        models.insert("MiniMax-M3".to_string(), ModelEntry { name: "MiniMax M3".to_string(), group: None });
+        models.insert("deepseek-v4-flash".to_string(), ModelEntry { name: "DeepSeek V4 Flash".to_string(), group: None });
+
+        let mut agents = HashMap::new();
+        agents.insert("multimodal-looker".to_string(), "omos/MiniMax-m3".to_string());
+        agents.insert("explore".to_string(), "omos/DeepSeek-V4-Flash".to_string());
+        let payload = ConfigPayload {
+            label: "label".to_string(),
+            provider: ConfigProvider {
+                name: "demo".to_string(),
+                options: ProviderOptions::default(),
+                models,
+                ..ConfigProvider::default()
+            },
+            agents,
+            categories: HashMap::new(),
+            source: None,
+        };
+
+        let v = build_oh_my_openagent(&payload);
+
+        assert_eq!(v["agents"]["multimodal-looker"]["model"], "omos/MiniMax-M3", "应归一化为 provider.models 中的精确大小写");
+        assert_eq!(v["agents"]["explore"]["model"], "omos/deepseek-v4-flash", "大写应归一化为小写");
+    }
+
+    // ---------- build_oh_my_openagent：未知 model 保持原样 ----------
+    #[test]
+    fn test_build_oh_my_openagent_unknown_model_keeps_original() {
+        let mut models = HashMap::new();
+        models.insert("deepseek-v4-flash".to_string(), ModelEntry { name: "DeepSeek V4 Flash".to_string(), group: None });
+
+        let mut agents = HashMap::new();
+        agents.insert("coder".to_string(), "omos/MiniMax-m3".to_string());
+        let payload = ConfigPayload {
+            label: "label".to_string(),
+            provider: ConfigProvider {
+                name: "demo".to_string(),
+                options: ProviderOptions::default(),
+                models,
+                ..ConfigProvider::default()
+            },
+            agents,
+            categories: HashMap::new(),
+            source: None,
+        };
+
+        let v = build_oh_my_openagent(&payload);
+
+        assert_eq!(v["agents"]["coder"]["model"], "omos/MiniMax-m3", "未知 model 应保持原样（让用户去修）");
     }
 }
