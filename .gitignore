@@ -1,44 +1,133 @@
-# Logs
-logs
+# =============================================================================
+# Node / Bun
+# =============================================================================
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# 日志
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+bun-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# 锁文件（保持本地，Bun/Cargo 各自重新生成）
+*.lock
+bun.lockb
 
+# 依赖与构建缓存
+.npm/
+.yarn/
+.pnp.*
+.eslintcache
+.cache/
+.parcel-cache/
+.vite/
+.turbo/
+.next/
+.nuxt/
+.svelte-kit/
+
+# =============================================================================
 # Tauri / Rust
-target/
-src-tauri/target/
+# =============================================================================
+# 根目录 .gitignore 不处理 src-tauri/target/，由 src-tauri/.gitignore 负责
 src-tauri/.tauri*/
+src-tauri/gen/schemas/   # 自动生成的 capability schema
 
-# Playwright
+# Rust 全局缓存（一般不会被提交但避免误提交）
+**/*.rs.bk
+*.pdb
+
+# =============================================================================
+# 测试产物
+# =============================================================================
 test-results/
 playwright-report/
 .playwright-mcp/
+coverage/
+*.lcov
+.nyc_output/
 
-# OMO workspace
+# =============================================================================
+# OMO 工作区（plan / session 缓存）
+# =============================================================================
 .omo/
 
-# Env files
+# =============================================================================
+# 环境变量与密钥
+# =============================================================================
 .env
 .env.*
+.envrc
 !.env.example
 
-# Editor directories and files
+# =============================================================================
+# 编辑器 / IDE
+# =============================================================================
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
+!.vscode/settings.json
+!.vscode/launch.json
+.idea/
+*.iml
+*.iws
+*.ipr
+.cursor/
+.aider*
+.fleet/
+*.sw?
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
-*.sw?
-*.lock
-bun.lockb
+
+# =============================================================================
+# 操作系统
+# =============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.Trash-*
+
+# =============================================================================
+# 其他
+# =============================================================================
+*.tsbuildinfo
+*.tgz
+*.zip
+*.dmg
+*.app
+*.deb
+*.rpm
+*.AppImage
+*.msi
+*.exe
+*.local-bundle.json
