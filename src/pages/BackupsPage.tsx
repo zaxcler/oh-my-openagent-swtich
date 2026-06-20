@@ -104,20 +104,51 @@ export default function BackupsPage() {
   return (
     <section className="max-w-3xl mx-auto py-4">
       {/* ----- 顶部工具栏 ----- */}
-      <div className="flex items-center justify-between mb-4">
-        <Link to="/" className="btn btn-ghost btn-sm" aria-label="返回列表">
-          ← 返回列表
+      <div className="flex items-center gap-3 mb-4">
+        <Link
+          to="/"
+          className="btn btn-ghost btn-sm btn-circle"
+          aria-label="返回列表"
+          title="返回列表"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M15.75 19.5L8.25 12l7.5-7.5"
+            />
+          </svg>
         </Link>
         <h1 className="text-lg font-semibold">备份管理</h1>
         <button
           type="button"
-          className="btn btn-ghost btn-sm"
+          className="btn btn-ghost btn-sm btn-circle ml-auto"
           onClick={() => void load()}
           disabled={loading}
           title="刷新"
           aria-label="刷新"
         >
-          ↻
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+            />
+          </svg>
         </button>
       </div>
 

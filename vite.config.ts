@@ -33,10 +33,14 @@ export default defineConfig({
           host,
           port: 1421,
         }
-      : undefined,
+      : true,
     watch: {
       // 告诉 Vite 忽略 `src-tauri` 目录，避免 Rust 变更触发不必要的重载。
       ignored: ['**/src-tauri/**'],
+    },
+    headers: {
+      // 防止 Tauri WKWebView 缓存旧版 CSS / JS，HMR 推送能立即生效。
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
     },
   },
 

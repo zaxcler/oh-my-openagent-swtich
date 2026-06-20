@@ -32,9 +32,12 @@ const OMOS_NPM: &str = "omos";
 /// 深度合并 source ConfigPayload 到 target opencode.jsonc Value 的 provider.omos 块
 ///
 /// 保留语义：
-/// - target 中非 omos 字段（`plugin` / `permission` / `$schema` / `provider.<other>`）原样保留
+/// - target 中非 omos 字段（`plugin` / `permission` / `$schema`）原样保留
 /// - target 中已有的 omos.models 其 `headers` / `limit` / `whitelist` / `attachment` /
 ///   `cost` / `modalities` / `experimental` / `provider` 等字段原样保留
+///
+/// 替换语义：
+/// - target 中 `provider` 下除 `omos` 外的所有其他 key（如 `openai` / `anthropic` 等）被删除
 pub fn merge_opencode(target: &mut Value, source: &ConfigPayload) -> Result<(), AppError> {
     if !target.is_object() {
         *target = Value::Object(Map::new());
@@ -72,19 +75,46 @@ pub fn merge_opencode(target: &mut Value, source: &ConfigPayload) -> Result<(), 
     }
     omos_block.insert("models".to_string(), Value::Object(models_map));
 
+    // 清空 provider 下所有 key，只保留 omos
+    let other_keys: Vec<String> = providers
+        .keys()
+        .filter(|k| k.as_str() != "omos")
+        .cloned()
+        .collect();
+    for k in other_keys {
+        providers.remove(&k);
+    }
     providers.insert("omos".to_string(), Value::Object(omos_block));
     Ok(())
 }
 
 /// 构建整体替换的 oh-my-openagent.json Value
+///
+/// 格式：
+/// ```json
+/// {
+///   "agents": {
+///     "coder": { "model": "omos/gpt-4o" }
+///   },
+///   "categories": {
+///     "web": { "model": "omos/gpt-4o" }
+///   }
+/// }
+/// ```
+///
+/// model 引用固定用 `omos/` 前缀（与 opencode.jsonc 中的 `provider.omos` 对应）。
 pub fn build_oh_my_openagent(payload: &ConfigPayload) -> Value {
     let mut agents = Map::new();
     for (k, v) in &payload.agents {
-        agents.insert(k.clone(), Value::String(format_model_ref(v)));
+        let model_id = extract_model_id(v);
+        let model_ref = format!("{}/{}", OMOS_NPM, model_id);
+        agents.insert(k.clone(), json!({ "model": model_ref }));
     }
     let mut categories = Map::new();
     for (k, v) in &payload.categories {
-        categories.insert(k.clone(), Value::String(format_model_ref(v)));
+        let model_id = extract_model_id(v);
+        let model_ref = format!("{}/{}", OMOS_NPM, model_id);
+        categories.insert(k.clone(), json!({ "model": model_ref }));
     }
     json!({
         "$schema": OH_MY_OPENCODE_SCHEMA,
@@ -93,8 +123,10 @@ pub fn build_oh_my_openagent(payload: &ConfigPayload) -> Value {
     })
 }
 
-fn format_model_ref(model_id: &str) -> String {
-    format!("{}/{}", OMOS_NPM, model_id)
+/// 从前端传入的 value 中提取 model id。
+/// 前端 RoleSelect 的 value 可能是 "omos/xxx" 或纯 "xxx"。
+fn extract_model_id(value: &str) -> &str {
+    value.rsplit('/').next().unwrap_or(value)
 }
 
 fn build_options_value(opts: &ProviderOptions) -> Value {
@@ -178,6 +210,7 @@ mod tests {
             },
             agents: HashMap::new(),
             categories: HashMap::new(),
+            source: None,
         }
     }
 
@@ -337,9 +370,9 @@ mod tests {
         );
     }
 
-    // ---------- 6. target 有 anthropic provider → 保留 ----------
+    // ---------- 6. target 有 anthropic provider → 替换时删除，只保留 omos ----------
     #[test]
-    fn test_merge_preserves_other_providers() {
+    fn test_merge_removes_other_providers() {
         let mut target = json!({
             "provider": {
                 "anthropic": {
@@ -362,8 +395,10 @@ mod tests {
         merge_opencode(&mut target, &source).unwrap();
 
         let providers = &target["provider"];
-        assert_eq!(providers["anthropic"]["name"], "Anthropic");
-        assert_eq!(providers["anthropic"]["options"]["apiKey"], "anthro-key");
+        assert!(
+            providers.get("anthropic").is_none(),
+            "anthropic provider 应被删除"
+        );
         assert_eq!(providers["omos"]["name"], "OpenAI");
     }
 
@@ -546,15 +581,20 @@ mod tests {
         categories.insert("web".to_string(), "claude-3".to_string());
         let payload = ConfigPayload {
             label: "label".to_string(),
-            provider: ConfigProvider::default(),
+            provider: ConfigProvider {
+                name: "openai".to_string(),
+                ..ConfigProvider::default()
+            },
             agents,
             categories,
+            source: None,
         };
 
         let v = build_oh_my_openagent(&payload);
 
         assert_eq!(v["$schema"], OH_MY_OPENCODE_SCHEMA);
-        assert_eq!(v["agents"]["coder"], "omos/gpt-4o");
-        assert_eq!(v["categories"]["web"], "omos/claude-3");
+        // model 引用固定用 omos/ 前缀，与 opencode.jsonc 的 provider.omos 对应
+        assert_eq!(v["agents"]["coder"]["model"], "omos/gpt-4o");
+        assert_eq!(v["categories"]["web"]["model"], "omos/claude-3");
     }
 }

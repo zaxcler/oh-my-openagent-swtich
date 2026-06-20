@@ -207,6 +207,7 @@ fn make_provider_payload(label: &str, api_key: &str, base_url: &str) -> ConfigPa
         },
         agents,
         categories,
+        source: None,
     }
 }
 
@@ -297,8 +298,8 @@ fn test_apply_config_writes_opencode_and_active() {
     assert!(omos_path.exists(), "oh-my-openagent.json 应被创建");
     let omos_content = fs::read_to_string(&omos_path).expect("读 omos");
     let omos_value: Value = serde_json::from_str(&omos_content).expect("parse omos");
-    assert_eq!(omos_value["agents"]["coder"], "omos/gpt-4o");
-    assert_eq!(omos_value["categories"]["default"], "omos/gpt-4o");
+    assert_eq!(omos_value["agents"]["coder"]["model"], "omos/gpt-4o");
+    assert_eq!(omos_value["categories"]["default"]["model"], "omos/gpt-4o");
     assert!(
         omos_value["$schema"].is_string(),
         "$schema 应为字符串"
@@ -408,10 +409,10 @@ fn test_apply_config_creates_backup() {
 }
 
 // =============================================================================
-// 测试 4: 合并保留已有 provider.anthropic
+// 测试 4: 合并时删除非 omos provider
 // =============================================================================
 #[test]
-fn test_merge_preserves_existing_provider() {
+fn test_merge_removes_other_providers() {
     let env = TestEnv::new();
 
     // 准备含 anthropic provider 的 opencode.jsonc
@@ -437,19 +438,13 @@ fn test_merge_preserves_existing_provider() {
     // apply
     apply_config(config.id.clone()).expect("apply");
 
-    // 验证两个 provider 都在
+    // 验证 anthropic 被删除，omos 被新 config 替换
     let content = fs::read_to_string(&opencode_path).expect("读 opencode");
     let value: Value = parse_jsonc(&content).expect("parse");
 
-    // anthropic 完整保留
-    assert_eq!(value["provider"]["anthropic"]["name"], "Anthropic");
-    assert_eq!(
-        value["provider"]["anthropic"]["npm"],
-        "@ai-sdk/anthropic"
-    );
-    assert_eq!(
-        value["provider"]["anthropic"]["options"]["apiKey"],
-        "anthro-key-original"
+    assert!(
+        value["provider"].get("anthropic").is_none(),
+        "anthropic provider 应被删除"
     );
 
     // omos 被新 config 替换

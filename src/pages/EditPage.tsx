@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Controller, useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { z } from 'zod';
 
 import ModelRow, { type ModelRowValue } from '@/components/ModelRow';
@@ -14,6 +15,7 @@ import {
 } from '@/lib/constants';
 import { tauriInvoke } from '@/lib/tauri';
 import { useConfigsStore } from '@/store/configs';
+import { showToast } from '@/store/toast';
 import type { Config, ConfigPayload, ModelEntry } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -32,7 +34,10 @@ import type { Config, ConfigPayload, ModelEntry } from '@/types';
 const schema = z.object({
   label: z.string().min(1, '配置名称必填'),
   provider: z.object({
-    name: z.string(),
+    name: z
+      .string()
+      .min(1, '供应商名称必填')
+      .regex(/^[A-Za-z][A-Za-z0-9_-]*$/, '供应商名称只能使用英文（字母/数字/下划线/连字符），且以字母开头'),
     npm: z.string().min(1, 'npm 必填'),
     options: z.object({
       api_key: z.string().min(1, 'apiKey 必填'),
@@ -66,8 +71,10 @@ const NEW_DEFAULTS: FormValues = {
     options: { api_key: '', base_url: '' },
     models: [EMPTY_MODEL],
   },
-  agents: {},
-  categories: {},
+  // 预填所有 role key 为空串，避开 zod `z.record(z.string())` 的 `Required` 校验。
+  // 空串由 RoleSelect 视觉兜底为 options[0]，由 onSubmit 兜底成 omos/${firstId}。
+  agents: Object.fromEntries(AGENT_KEYS.map((k) => [k, ''])),
+  categories: Object.fromEntries(CATEGORY_KEYS.map((k) => [k, ''])),
 };
 
 // ---------------------------------------------------------------------------
@@ -131,6 +138,7 @@ export default function EditPage() {
   const [loading, setLoading] = useState(!isNew);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [importingRoleJson, setImportingRoleJson] = useState(false);
 
   const {
     control,
@@ -138,7 +146,6 @@ export default function EditPage() {
     handleSubmit,
     reset,
     setValue,
-    getValues,
     watch,
     formState: { errors },
   } = useForm<FormValues>({
@@ -152,55 +159,13 @@ export default function EditPage() {
     name: 'provider.models',
   });
 
-  // 实时监听 models 数组，用于：
-  // 1) 生成 RoleSelect 的 options
-  // 2) 在第一个 model id 变化时回填空的 agents / categories
+  // 监听 models 用于生成 RoleSelect 的 options。角色默认值的同步由
+  // RoleSelect 内部 fallback + onSubmit 兜底承担，避开 useEffect + getValues
+  // 缓存在逐字符输入下失效的坑。
   const watchedModels = useWatch({ control, name: 'provider.models' });
   const modelOptions = (watchedModels ?? [])
     .filter((m): m is ModelRowValue => Boolean(m && m.id))
     .map((m) => toOption(m.id));
-
-  /** 记录上一次同步的 firstModelId，避免每次输入都覆盖用户已选 role。 */
-  const lastSyncedFirstIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!watchedModels || watchedModels.length === 0) {
-      lastSyncedFirstIdRef.current = null;
-      return;
-    }
-    const firstId = watchedModels[0]?.id;
-    if (!firstId) {
-      lastSyncedFirstIdRef.current = null;
-      return;
-    }
-    if (firstId === lastSyncedFirstIdRef.current) return;
-    lastSyncedFirstIdRef.current = firstId;
-
-    const firstValue = toOption(firstId);
-    const currentAgents = getValues('agents') ?? {};
-    const nextAgents: Record<string, string> = { ...currentAgents };
-    let agentsChanged = false;
-    for (const key of AGENT_KEYS) {
-      if (!nextAgents[key]) {
-        nextAgents[key] = firstValue;
-        agentsChanged = true;
-      }
-    }
-    if (agentsChanged) setValue('agents', nextAgents, { shouldDirty: false });
-
-    const currentCategories = getValues('categories') ?? {};
-    const nextCategories: Record<string, string> = { ...currentCategories };
-    let categoriesChanged = false;
-    for (const key of CATEGORY_KEYS) {
-      if (!nextCategories[key]) {
-        nextCategories[key] = firstValue;
-        categoriesChanged = true;
-      }
-    }
-    if (categoriesChanged) {
-      setValue('categories', nextCategories, { shouldDirty: false });
-    }
-  }, [watchedModels, getValues, setValue]);
 
   // 编辑模式：加载已有配置到表单
   useEffect(() => {
@@ -236,6 +201,54 @@ export default function EditPage() {
       cancelled = true;
     };
   }, [editingId, isNew, reset]);
+
+  const handleImportRoleJson = async () => {
+    if (importingRoleJson) return;
+    setImportingRoleJson(true);
+    try {
+      const selected = await openDialog({
+        title: '选择 oh-my-openagent 格式 JSON',
+        multiple: false,
+        filters: [{ name: 'JSON', extensions: ['json', 'jsonc'] }],
+      });
+      if (!selected) return;
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      if (!path) return;
+      const result = await tauriInvoke<{
+        agents: Record<string, string>;
+        categories: Record<string, string>;
+      }>('read_role_json_file', { path });
+      let filled = 0;
+      for (const key of AGENT_KEYS) {
+        if (result.agents[key] !== undefined) {
+          setValue(`agents.${key}`, result.agents[key], { shouldDirty: true });
+          filled++;
+        }
+      }
+      for (const key of CATEGORY_KEYS) {
+        if (result.categories[key] !== undefined) {
+          setValue(`categories.${key}`, result.categories[key], { shouldDirty: true });
+          filled++;
+        }
+      }
+      showToast(`已导入 ${filled} 项角色映射`, 'success');
+    } catch (err) {
+      showToast(`导入失败：${String(err)}`, 'error');
+    } finally {
+      setImportingRoleJson(false);
+    }
+  };
+
+  const onInvalid = (errs: typeof errors) => {
+    const list = Object.entries(errs)
+      .map(([k, v]) => {
+        const msg = v && 'message' in v ? (v as { message?: string }).message : JSON.stringify(v);
+        return `${k}: ${msg}`;
+      })
+      .join('；');
+    console.error('[EditPage] validation failed:', list, 'errs=', errs);
+    showToast(`保存失败：${list || '请检查表单字段'}`, 'error');
+  };
 
   const onSubmit = handleSubmit(async (data) => {
     if (submitting) return;
@@ -292,10 +305,11 @@ export default function EditPage() {
       navigate('/');
     } catch (err) {
       console.error('[EditPage] save failed:', err);
+      showToast(`保存失败：${String(err)}`, 'error');
     } finally {
       setSubmitting(false);
     }
-  });
+  }, onInvalid);
 
   const titleLabel = watch('label');
   const title = isNew
@@ -304,27 +318,52 @@ export default function EditPage() {
 
   if (loading) {
     return (
-      <section className="max-w-3xl mx-auto py-8 text-center opacity-70">
-        <p className="text-sm">加载中...</p>
-      </section>
+      <div className="max-w-3xl mx-auto py-8 text-center">
+        <span className="loading loading-spinner loading-md text-primary" />
+        <p className="text-sm opacity-70 mt-3">加载中...</p>
+      </div>
     );
   }
 
   if (loadError) {
     return (
-      <section className="max-w-3xl mx-auto py-8 text-center">
+      <div className="max-w-3xl mx-auto py-8 text-center">
         <h2 className="text-2xl font-semibold mb-2 text-error">加载失败</h2>
         <p className="text-sm opacity-70 mb-4">{loadError}</p>
         <Link to="/" className="btn btn-sm btn-ghost">
           返回列表
         </Link>
-      </section>
+      </div>
     );
   }
 
   return (
-    <div className="max-w-3xl mx-auto pb-24">
-      <h1 className="text-2xl font-semibold mb-6">{title}</h1>
+    <div className="max-w-3xl mx-auto pb-32">
+      {/* ----- 顶部工具栏：返回 + 标题 ----- */}
+      <div className="sticky top-0 z-10 -mx-4 px-4 py-2 bg-base-100/85 backdrop-blur border-b border-base-300/60 flex items-center gap-3">
+        <Link
+          to="/"
+          className="btn btn-ghost btn-sm btn-circle"
+          aria-label="返回列表"
+          title="返回列表"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M15.75 19.5L8.25 12l7.5-7.5"
+            />
+          </svg>
+        </Link>
+        <h1 className="text-base font-semibold truncate flex-1">{title}</h1>
+      </div>
 
       <form onSubmit={onSubmit} className="space-y-6" noValidate>
         {/* ---------- 基础信息 ---------- */}
@@ -364,14 +403,23 @@ export default function EditPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="form-control w-full">
                 <div className="label py-1">
-                  <span className="label-text">供应商名称</span>
+                  <span className="label-text">供应商名称 *（仅英文）</span>
                 </div>
                 <input
                   type="text"
-                  className="input input-bordered w-full"
+                  className={`input input-bordered w-full ${
+                    errors.provider?.name ? 'input-error' : ''
+                  }`}
                   placeholder="openai"
                   {...register('provider.name')}
                 />
+                {errors.provider?.name && (
+                  <div className="label py-1">
+                    <span className="label-text-alt text-error">
+                      {errors.provider.name.message}
+                    </span>
+                  </div>
+                )}
               </label>
               <label className="form-control w-full">
                 <div className="label py-1">
@@ -465,51 +513,54 @@ export default function EditPage() {
 
         {/* ---------- 角色模型设置 ---------- */}
         <section className="card bg-base-200 p-4">
-          <h2 className="text-lg font-medium mb-3">角色模型设置</h2>
-          {modelOptions.length === 0 ? (
-            <p className="text-sm opacity-70">
-              请先在「供应商设置」中添加 model
-            </p>
-          ) : (
-            <>
-              <h3 className="text-sm font-medium opacity-70 mb-2">Agents</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-                {AGENT_KEYS.map((key) => (
-                  <Controller
-                    key={key}
-                    control={control}
-                    name={`agents.${key}`}
-                    render={({ field }) => (
-                      <RoleSelect
-                        label={AGENT_LABELS[key] ?? key}
-                        value={field.value ?? ''}
-                        options={modelOptions}
-                        onChange={field.onChange}
-                      />
-                    )}
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-medium">角色模型设置</h2>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => void handleImportRoleJson()}
+              disabled={importingRoleJson}
+              title="从 oh-my-openagent.json 导入 agents/categories"
+            >
+              {importingRoleJson ? '导入中…' : '导入 JSON'}
+            </button>
+          </div>
+          <h3 className="text-sm font-medium opacity-70 mb-2">Agents</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+            {AGENT_KEYS.map((key) => (
+              <Controller
+                key={key}
+                control={control}
+                name={`agents.${key}`}
+                render={({ field }) => (
+                  <RoleSelect
+                    label={AGENT_LABELS[key] ?? key}
+                    value={field.value ?? ''}
+                    options={modelOptions}
+                    onChange={field.onChange}
                   />
-                ))}
-              </div>
-              <h3 className="text-sm font-medium opacity-70 mb-2">Categories</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {CATEGORY_KEYS.map((key) => (
-                  <Controller
-                    key={key}
-                    control={control}
-                    name={`categories.${key}`}
-                    render={({ field }) => (
-                      <RoleSelect
-                        label={CATEGORY_LABELS[key] ?? key}
-                        value={field.value ?? ''}
-                        options={modelOptions}
-                        onChange={field.onChange}
-                      />
-                    )}
+                )}
+              />
+            ))}
+          </div>
+          <h3 className="text-sm font-medium opacity-70 mb-2">Categories</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {CATEGORY_KEYS.map((key) => (
+              <Controller
+                key={key}
+                control={control}
+                name={`categories.${key}`}
+                render={({ field }) => (
+                  <RoleSelect
+                    label={CATEGORY_LABELS[key] ?? key}
+                    value={field.value ?? ''}
+                    options={modelOptions}
+                    onChange={field.onChange}
                   />
-                ))}
-              </div>
-            </>
-          )}
+                )}
+              />
+            ))}
+          </div>
         </section>
 
         {/* ---------- 底部操作 ---------- */}

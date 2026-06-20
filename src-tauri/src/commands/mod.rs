@@ -25,7 +25,7 @@ use crate::storage::configs::{
 use crate::storage::detect::{detect_active, ActiveStatus};
 use crate::storage::export::export_config as export_config_impl;
 use crate::storage::import::{import_config_file as import_config_file_impl, read_current_opencode};
-use crate::storage::paths::opencode_dir;
+use crate::storage::paths::{existing_omos_path, omos_path, opencode_dir};
 
 // ---------------------------------------------------------------------------
 // 辅助类型
@@ -78,6 +78,12 @@ pub fn delete_config(id: String) -> Result<(), AppError> {
     crate::storage::configs::delete_config(&id)
 }
 
+/// 复制配置：创建新 config，label = "原名 - Copy"，payload 深拷贝，source 清空
+#[tauri::command]
+pub fn duplicate_config(id: String) -> Result<Config, AppError> {
+    crate::storage::configs::duplicate_config(&id)
+}
+
 // ---------------------------------------------------------------------------
 // 命令 6: apply_config — 核心流程
 // ---------------------------------------------------------------------------
@@ -104,7 +110,7 @@ pub fn apply_config(id: String) -> Result<ApplyResult, AppError> {
 
     let opencode_dir = opencode_dir()?;
     let opencode_path = opencode_dir.join("opencode.jsonc");
-    let omos_path = opencode_dir.join("oh-my-openagent.json");
+    let omos_path = omos_path()?;
 
     let mut backup_files: Vec<PathBuf> = Vec::new();
 
@@ -201,9 +207,63 @@ pub fn import_from_opencode() -> Result<Option<Config>, AppError> {
         provider,
         agents,
         categories,
+        source: None,
     };
     let updated = crate::storage::configs::update_config(&config.id, payload)?;
     Ok(Some(updated))
+}
+
+/// 自动从 opencode.jsonc + oh-my-openagent.json 导入配置（app 启动时调用）
+///
+/// 合并 provider.omos + agents/categories，通过 source 字段去重。
+/// 如果两个文件都不存在或为空 → Ok(None)
+#[tauri::command]
+pub fn auto_import_from_opencode() -> Result<Option<Config>, AppError> {
+    crate::storage::import::auto_import_from_opencode()
+}
+
+/// 读取外部 oh-my-openagent 格式 JSON 文件，提取 agents + categories
+///
+/// 返回 (agents, categories)，每个值是纯 model id（去掉原 prefix），与 `agents.${key}` 表单值一致。
+/// 如果文件不存在或解析失败 → AppError
+#[tauri::command]
+pub fn read_role_json_file(path: String) -> Result<RoleJsonContent, AppError> {
+    use std::fs;
+    use serde_json::Value;
+
+    let p = PathBuf::from(&path);
+    let content = fs::read_to_string(&p).map_err(|e| AppError::IoError {
+        message: e.to_string(),
+    })?;
+    let value: Value = serde_json::from_str(&content)?;
+
+    fn strip_prefix(raw: &str) -> String {
+        raw.rsplit('/').next().unwrap_or(raw).to_string()
+    }
+
+    let to_map = |obj: Option<&serde_json::Map<String, Value>>| -> HashMap<String, String> {
+        obj.map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| {
+                    v.get("model")
+                        .and_then(|m| m.as_str())
+                        .map(|s| (k.clone(), strip_prefix(s)))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+    };
+
+    let agents = to_map(value.get("agents").and_then(|v| v.as_object()));
+    let categories = to_map(value.get("categories").and_then(|v| v.as_object()));
+
+    Ok(RoleJsonContent { agents, categories })
+}
+
+#[derive(serde::Serialize)]
+pub struct RoleJsonContent {
+    pub agents: HashMap<String, String>,
+    pub categories: HashMap<String, String>,
 }
 
 /// 从外部 JSON 文件导入配置
@@ -259,7 +319,8 @@ pub fn get_active_status(configs: Vec<ConfigMeta>) -> Result<ActiveStatus, AppEr
     };
 
     let opencode_path = opencode_dir.join("opencode.jsonc");
-    let omos_path = opencode_dir.join("oh-my-openagent.json");
+    // 兼容 rename transition：先 oh-my-opencode.json 后 oh-my-openagent.json
+    let omos_path = existing_omos_path()?.unwrap_or_else(|| omos_path().unwrap());
 
     let opencode_fp: Option<String> = fs::read_to_string(&opencode_path)
         .ok()
@@ -350,6 +411,7 @@ mod integration_tests {
             provider: crate::storage::configs::ConfigProvider::default(),
             agents,
             categories: HashMap::new(),
+            source: None,
         };
         let updated = update_config(config.id.clone(), payload).unwrap();
         assert_eq!(updated.label, "my-config");
@@ -397,6 +459,7 @@ mod integration_tests {
             },
             agents,
             categories,
+            source: None,
         };
         let config = create_config("apply-test".to_string()).unwrap();
         let updated = update_config(config.id.clone(), payload).unwrap();
@@ -417,7 +480,8 @@ mod integration_tests {
         // 验证 oh-my-openagent.json 被写入
         assert!(omos_path.exists(), "oh-my-openagent.json 应被创建");
         let omos_content = fs::read_to_string(&omos_path).unwrap();
-        assert!(omos_content.contains("omos/gpt-4o"), "omos 应包含 agents");
+        assert!(omos_content.contains("\"model\""), "omos agents 应为对象格式");
+        assert!(omos_content.contains("omos/gpt-4o"), "omos model 引用应固定用 omos/ 前缀");
 
         teardown_all_test_dirs();
     }

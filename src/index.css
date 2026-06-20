@@ -1,1 +1,19 @@
 @import "tailwindcss";
+@plugin "daisyui";
+
+/* daisyUI 的 .input/.textarea/.select 用了更高优先级的 ::placeholder 规则，
+   必须用类选择器覆盖；用 !important 强制覆盖 daisyUI 的 color-mix 表达式。
+   用 currentColor + 低 opacity 而不是固定 alpha，避免 dark theme 下
+   base-content 接近白色时 placeholder 过亮。 */
+@layer base {
+  .input::placeholder,
+  .textarea::placeholder,
+  .select::placeholder,
+  input::placeholder,
+  textarea::placeholder,
+  select::placeholder {
+    color: currentColor !important;
+    opacity: 0.3 !important;
+    font-style: italic;
+  }
+}

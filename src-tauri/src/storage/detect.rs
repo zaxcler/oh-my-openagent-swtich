@@ -7,7 +7,11 @@ use crate::storage::active::read_active;
 use crate::storage::configs::ConfigMeta;
 
 /// 激活状态枚举
+///
+/// `#[serde(tag = "type")]` 让序列化为 `{"type": "Active", "config_id": "..."}` 格式，
+/// 与前端 `ActiveStatus` 类型定义一致。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
 pub enum ActiveStatus {
     /// fingerprint 匹配，配置已激活
     Active { config_id: String },

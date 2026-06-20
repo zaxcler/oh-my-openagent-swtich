@@ -24,9 +24,15 @@ export default function RoleSelect({
   onChange,
 }: RoleSelectProps) {
   const empty = options.length === 0;
-  // 受控组件：浏览器只会显示 value 匹配的 option；这里做一层防御性归一化，
-  // 避免在 value 为空字符串时浏览器把第一个 option 视觉上当成 value。
-  const normalized = value && options.includes(value) ? value : '';
+  // 受控组件：浏览器只会显示 value 匹配的 option。value 不在 options 中时
+  // 回退显示 options[0]（视觉默认值），form state 保持原值，由 onSubmit 兜底
+  // 把空值替换为第一个 model option。空字符串仅在 options 也为空时使用。
+  const normalized =
+    value && options.includes(value)
+      ? value
+      : options.length > 0
+        ? options[0]
+        : '';
 
   return (
     <label className="form-control w-full">
@@ -45,18 +51,11 @@ export default function RoleSelect({
             请先添加 model
           </option>
         ) : (
-          <>
-            {normalized === '' && (
-              <option value="" disabled>
-                请选择
-              </option>
-            )}
-            {options.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </>
+          options.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))
         )}
       </select>
     </label>

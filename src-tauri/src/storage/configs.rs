@@ -39,6 +39,9 @@ pub struct ConfigPayload {
     pub provider: ConfigProvider,
     pub agents: HashMap<String, String>,
     pub categories: HashMap<String, String>,
+    /// 自动导入时记录源文件路径，用于去重
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -130,6 +133,7 @@ pub fn create_config(label: &str) -> Result<Config, AppError> {
         provider: ConfigProvider::default(),
         agents: HashMap::new(),
         categories: HashMap::new(),
+        source: None,
     };
     let config = Config {
         id: id.clone(),
@@ -164,6 +168,33 @@ pub fn delete_config(id: &str) -> Result<(), AppError> {
         fs::remove_file(&path)?;
     }
     Ok(())
+}
+
+/// 复制配置：新 id、新 label（"原名 - Copy"），payload 深拷贝，source 清空
+pub fn duplicate_config(id: &str) -> Result<Config, AppError> {
+    let source = get_config(id)?;
+    let new_id = Uuid::new_v4().to_string();
+    let now = Utc::now();
+    let new_label = format!("{} - Copy", source.label);
+    let mut new_payload = source.payload;
+    new_payload.label = new_label.clone();
+    new_payload.source = None;
+
+    let config = Config {
+        id: new_id.clone(),
+        label: new_label,
+        created_at: now,
+        updated_at: now,
+        payload: new_payload,
+    };
+    let dir = effective_configs_dir()?;
+    if !dir.exists() {
+        fs::create_dir_all(&dir)?;
+    }
+    let path = config_path(&new_id, &dir);
+    let content = serde_json::to_string_pretty(&config)?;
+    fs::write(&path, content)?;
+    Ok(config)
 }
 
 #[cfg(test)]
@@ -240,6 +271,7 @@ mod tests {
                 provider: ConfigProvider::default(),
                 agents: HashMap::new(),
                 categories: HashMap::new(),
+                source: None,
             };
             update_config(&created.id, new_payload).unwrap();
             let updated = get_config(&created.id).unwrap();
@@ -260,6 +292,7 @@ mod tests {
                 provider: ConfigProvider::default(),
                 agents,
                 categories,
+                source: None,
             };
             update_config(&created.id, new_payload).unwrap();
             let updated = get_config(&created.id).unwrap();
