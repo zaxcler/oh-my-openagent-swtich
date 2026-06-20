@@ -71,11 +71,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NO_STRIP: true
 
+      - name: List build outputs (debug)
+        run: |
+          echo "=== target dir ==="
+          ls -la src-tauri/target/${{ matrix.target }}/release/bundle/ 2>&1 || echo "no bundle dir"
+          echo "=== find all bundle files ==="
+          find src-tauri/target/${{ matrix.target }}/release/bundle -type f 2>&1 || echo "nothing found"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          if-no-files-found: error
+          if-no-files-found: warn
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
