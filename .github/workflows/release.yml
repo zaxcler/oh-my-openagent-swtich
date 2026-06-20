@@ -98,60 +98,27 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: List downloaded files
-        run: find artifacts -type f | sort || echo "no files"
+        run: find artifacts -type f 2>/dev/null | sort || echo "no files found"
 
-      - name: Collect release assets
-        id: assets
-        run: |
-          FILES=$(find artifacts -type f \( -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" -o -name "*.app" -o -name "*.AppImage" \) 2>/dev/null || true)
-          if [ -z "$FILES" ]; then
-            echo "has_assets=false" >> "$GITHUB_OUTPUT"
-            echo "No binary assets found"
-          else
-            echo "has_assets=true" >> "$GITHUB_OUTPUT"
-            echo "$FILES" | sort
-          fi
-
-      - name: Delete existing release (if any)
-        continue-on-error: true
+      - name: Create draft release with binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag_name }}
+          name: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag_name }}
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.msi
+            artifacts/**/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag_name }}"
-          echo "Deleting existing release $TAG (if exists)..."
-          gh release delete "$TAG" --yes 2>/dev/null || echo "No existing release to delete"
-
-      - name: Create draft release with assets
-        if: steps.assets.outputs.has_assets == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag_name }}"
-          # Collect all binary files
-          ASSETS=$(find artifacts -type f \( -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" -o -name "*.app" \) | sort)
-          echo "Uploading assets:"
-          echo "$ASSETS"
-          # shellcheck disable=SC2086
-          gh release create "$TAG" \
-            --draft \
-            --generate-notes \
-            --clobber \
-            $ASSETS
-
-      - name: Create draft release without assets
-        if: steps.assets.outputs.has_assets != 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag_name }}"
-          echo "No binary assets found, creating release with source only"
-          gh release create "$TAG" --draft --generate-notes
