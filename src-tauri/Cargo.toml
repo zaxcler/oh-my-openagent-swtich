@@ -1,11 +1,9 @@
 [package]
 name = "oh-my-openagent-switch"
 version = "0.1.0"
-description = "A Tauri App for managing OpenAgent switches"
-authors = ["you"]
+description = "跨平台桌面工具，一键切换 oh-my-openagent + opencode 的供应商配置"
+authors = ["zaxcler"]
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
 name = "oh_my_openagent_switch_lib"
@@ -19,15 +17,18 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tempfile = "3"
-jsonc-parser = { version = "0.26", features = ["serde"] }
-dirs = "5"
-uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
-thiserror = "1"
 sha2 = "0.10"
 hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
+dirs = "6"
+tempfile = "3"
+jsonc-parser = { version = "0.26", features = ["serde"] }
 
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
