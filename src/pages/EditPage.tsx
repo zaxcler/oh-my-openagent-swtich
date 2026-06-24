@@ -16,7 +16,7 @@ import {
 import { tauriInvoke } from '@/lib/tauri';
 import { useConfigsStore } from '@/store/configs';
 import { showToast } from '@/store/toast';
-import type { Config, ConfigPayload, ModelEntry } from '@/types';
+import type { Config, ConfigPayload, ModelEntry, Modality } from '@/types';
 
 // ---------------------------------------------------------------------------
 // 表单 schema
@@ -49,6 +49,12 @@ const schema = z.object({
           id: z.string().min(1, 'model id 必填'),
           name: z.string().min(1, 'model name 必填'),
           group: z.string().optional(),
+          modalities: z
+            .object({
+              input: z.array(z.enum(['text', 'image', 'audio', 'video', 'pdf'])),
+              output: z.array(z.enum(['text', 'image', 'audio', 'video', 'pdf'])),
+            })
+            .optional(),
         }),
       )
       .min(1, '至少 1 个 model'),
@@ -60,7 +66,18 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 /** 一行空 model 模板（点击"添加 model"时复用）。 */
-const EMPTY_MODEL: ModelRowValue = { id: '', name: '', group: '' };
+const EMPTY_MODEL: ModelRowValue = { id: '', name: '', group: '', modalities: undefined };
+
+/** 清理 modalities:全空/无效值转 `undefined`(让 Rust 端 skip_serializing 跳过)。 */
+function cleanModalities(
+  m: ModelRowValue['modalities'],
+): { input: Modality[]; output: Modality[] } | undefined {
+  if (!m) return undefined;
+  const input = m.input ?? [];
+  const output = m.output ?? [];
+  if (input.length === 0 && output.length === 0) return undefined;
+  return { input, output };
+}
 
 /** 新建模式下的表单初始值。 */
 const NEW_DEFAULTS: FormValues = {
@@ -88,9 +105,11 @@ function toModelRecord(rows: ModelRowValue[]): Record<string, ModelEntry> {
   const out: Record<string, ModelEntry> = {};
   for (const row of rows) {
     if (!row.id) continue;
+    const modalities = cleanModalities(row.modalities);
     out[row.id] = {
       name: row.name,
       ...(row.group ? { group: row.group } : {}),
+      ...(modalities ? { modalities } : {}),
     };
   }
   return out;
@@ -104,6 +123,9 @@ function toModelRows(record: Record<string, ModelEntry>): ModelRowValue[] {
     id,
     name: entry.name,
     group: entry.group ?? '',
+    modalities: entry.modalities
+      ? { input: entry.modalities.input, output: entry.modalities.output }
+      : undefined,
   }));
   return rows.length > 0 ? rows : [EMPTY_MODEL];
 }
