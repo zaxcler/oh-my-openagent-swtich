@@ -16,8 +16,10 @@ pnpm-debug.log*
 lerna-debug.log*
 bun-debug.log*
 
-# 锁文件（保持本地，Bun/Cargo 各自重新生成）
-*.lock
+# 锁文件
+# - bun.lock* 本地不 commit（Bun 重新生成）
+# - Cargo.lock commit（binary 项目需要 reproducible builds,避免 CI 用最新 deps 导致 test/build 行为漂移）
+bun.lock
 bun.lockb
 
 # 依赖与构建缓存
