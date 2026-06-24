@@ -146,7 +146,10 @@ fn read_modalities(value: Option<&Value>) -> Option<Modalities> {
 /// - 优先读 `opencode_dir/oh-my-openagent.json`，不存在则读 `oh-my-opencode.json`（legacy）
 /// - 文件不存在 → `Ok(None)`
 /// - 每个 agent/category 的值取 `model` 字段，前缀替换为 `omos/`
-pub fn read_oh_my_openagent() -> Result<Option<(HashMap<String, String>, HashMap<String, String>)>, AppError> {
+type AgentsMap = HashMap<String, String>;
+type CategoriesMap = HashMap<String, String>;
+
+pub fn read_oh_my_openagent() -> Result<Option<(AgentsMap, CategoriesMap)>, AppError> {
     use crate::storage::paths::existing_omos_path;
 
     let file_path = match existing_omos_path()? {
