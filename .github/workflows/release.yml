@@ -79,6 +79,14 @@ jobs:
           echo "=== find all bundle files ==="
           find src-tauri/target/release/bundle -type f 2>&1 || echo "nothing found"
 
+      - name: Zip .app bundle for release (macOS only)
+        if: runner.os == 'macOS'
+        run: |
+          cd src-tauri/target/release/bundle/macos
+          # dmg 在 macOS CI 上偶发失败 (create-dmg 传参 bug); 同步打 zip 作 fallback
+          # 且 zip 形态稳定匹配 softprops 的 files glob
+          zip -r oh-my-openagent-switch_${GITHUB_SHA::7}_aarch64.zip oh-my-openagent-switch.app
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -86,6 +94,7 @@ jobs:
           if-no-files-found: warn
           path: |
             src-tauri/target/release/bundle/macos/*.app
+            src-tauri/target/release/bundle/macos/*.zip
             src-tauri/target/release/bundle/dmg/*.dmg
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
@@ -116,7 +125,7 @@ jobs:
           fail_on_unmatched_files: false
           replacement: 'true'
           files: |
-            artifacts/**/*.app
+            artifacts/macos-latest/*.zip
             artifacts/**/*.dmg
             artifacts/**/*.AppImage
             artifacts/**/*.deb
