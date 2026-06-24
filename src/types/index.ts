@@ -12,10 +12,20 @@
 
 // ----- ConfigPayload 嵌套结构 -----
 
-/** 单个模型项；`group` 可选（部分 provider 不需要分组）。 */
+/** opencode 支持的多模态类型。 */
+export type Modality = 'text' | 'image' | 'audio' | 'video' | 'pdf';
+
+/** 单个 model 的多模态声明。input/output 至少有一项非空时,会被写入 `opencode.jsonc` 的 `modalities` 块。 */
+export interface Modalities {
+  input: Modality[];
+  output: Modality[];
+}
+
+/** 单个模型项；`group` 可选（部分 provider 不需要分组），`modalities` 可选（不填或全空时不会写入 JSON）。 */
 export interface ModelEntry {
   name: string;
   group?: string;
+  modalities?: Modalities;
 }
 
 /** provider 私有配置（API key / base URL 等）。 */
