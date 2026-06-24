@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use crate::config::jsonc::parse_jsonc;
 use crate::error::AppError;
-use crate::storage::configs::{create_config, update_config, Config, ConfigPayload, ConfigProvider, ModelEntry, ProviderOptions};
+use crate::storage::configs::{create_config, update_config, Config, ConfigPayload, ConfigProvider, ModelEntry, Modalities, ProviderOptions};
 use crate::storage::paths::opencode_dir;
 #[cfg(test)]
 use crate::storage::paths::{set_test_opencode_dir, clear_test_opencode_dir};
@@ -87,7 +87,15 @@ pub fn read_current_opencode() -> Result<Option<ConfigProvider>, AppError> {
                 .get("group")
                 .and_then(|v| v.as_str())
                 .map(String::from);
-            models.insert(key.clone(), ModelEntry { name: model_name, group });
+            let modalities = read_modalities(model_value.get("modalities"));
+            models.insert(
+                key.clone(),
+                ModelEntry {
+                    name: model_name,
+                    group,
+                    modalities,
+                },
+            );
         }
     }
 
@@ -97,6 +105,39 @@ pub fn read_current_opencode() -> Result<Option<ConfigProvider>, AppError> {
         options: ProviderOptions { api_key, base_url },
         models,
     }))
+}
+
+/// 从外部 JSON 节点里解析 modalities。
+///
+/// 形如 `{"input": ["text", "image"], "output": ["text"]}`。
+/// input/output 字段均为可选；缺失或非数组时视为空。
+/// 仅在 input/output **都**为空时返回 `None`（保持序列化结果干净）。
+fn read_modalities(value: Option<&Value>) -> Option<Modalities> {
+    let v = value?;
+    let obj = v.as_object()?;
+    let input: Vec<String> = obj
+        .get("input")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let output: Vec<String> = obj
+        .get("output")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if input.is_empty() && output.is_empty() {
+        None
+    } else {
+        Some(Modalities { input, output })
+    }
 }
 
 /// 从 oh-my-openagent.json 读取 agents + categories
@@ -296,6 +337,7 @@ pub fn import_config_file(source: &Path) -> Result<Config, AppError> {
 mod tests {
     use super::*;
     use crate::storage::configs::TEST_CONFIGS_DIR;
+    use serde_json::json;
 
     fn with_configs_dir<F>(f: F)
     where
@@ -611,5 +653,49 @@ mod tests {
             clear_test_opencode_dir();
             std::mem::forget(tmp);
         });
+    }
+
+    // ---------- read_modalities 解析 ----------
+
+    #[test]
+    fn test_read_modalities_input_and_output() {
+        let v = json!({"input": ["text", "image"], "output": ["text"]});
+        let m = read_modalities(Some(&v)).unwrap();
+        assert_eq!(m.input, vec!["text", "image"]);
+        assert_eq!(m.output, vec!["text"]);
+    }
+
+    #[test]
+    fn test_read_modalities_input_only() {
+        let v = json!({"input": ["text"]});
+        let m = read_modalities(Some(&v)).unwrap();
+        assert_eq!(m.input, vec!["text"]);
+        assert!(m.output.is_empty(), "output 缺省应为空,不返回 None");
+    }
+
+    #[test]
+    fn test_read_modalities_all_empty_returns_none() {
+        let v = json!({"input": [], "output": []});
+        assert!(read_modalities(Some(&v)).is_none());
+    }
+
+    #[test]
+    fn test_read_modalities_missing_value_returns_none() {
+        assert!(read_modalities(None).is_none());
+    }
+
+    #[test]
+    fn test_read_modalities_non_object_returns_none() {
+        let v = json!("not an object");
+        assert!(read_modalities(Some(&v)).is_none());
+    }
+
+    #[test]
+    fn test_read_modalities_ignores_non_string_array_entries() {
+        // 非法元素（数字、null）应被过滤掉
+        let v = json!({"input": ["text", 42, null, "image"], "output": ["text"]});
+        let m = read_modalities(Some(&v)).unwrap();
+        assert_eq!(m.input, vec!["text", "image"]);
+        assert_eq!(m.output, vec!["text"]);
     }
 }

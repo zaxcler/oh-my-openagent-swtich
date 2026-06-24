@@ -58,10 +58,32 @@ pub struct ProviderOptions {
     pub base_url: String,
 }
 
+/// 单个 model 的多模态声明。
+///
+/// 字段可选；空数组会被 `skip_serializing_if` 跳过，从而**不**写入
+/// `opencode.jsonc`，保证旧配置序列化结果完全一致。
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct Modalities {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelEntry {
     pub name: String,
     pub group: Option<String>,
+    /// 可选的多模态声明；`None` 或全空数组时不会写入 JSON。
+    #[serde(default, skip_serializing_if = "is_modalities_empty")]
+    pub modalities: Option<Modalities>,
+}
+
+fn is_modalities_empty(m: &Option<Modalities>) -> bool {
+    match m {
+        None => true,
+        Some(v) => v.input.is_empty() && v.output.is_empty(),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

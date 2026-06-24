@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use serde_json::{json, Map, Value};
 
 use crate::error::AppError;
-use crate::storage::configs::{ConfigPayload, ProviderOptions};
+use crate::storage::configs::{ConfigPayload, Modalities, ProviderOptions};
 
 /// 固定 $schema 引用地址
 const OH_MY_OPENCODE_SCHEMA: &str =
@@ -63,6 +63,9 @@ pub fn merge_opencode(target: &mut Value, source: &ConfigPayload) -> Result<(), 
         obj.insert("name".to_string(), Value::String(entry.name.clone()));
         if let Some(group) = &entry.group {
             obj.insert("group".to_string(), Value::String(group.clone()));
+        }
+        if let Some(modalities) = build_modalities_value(&entry.modalities) {
+            obj.insert("modalities".to_string(), modalities);
         }
         models_map.insert(model_id.clone(), Value::Object(obj));
     }
@@ -135,6 +138,31 @@ fn build_options_value(opts: &ProviderOptions) -> Value {
     })
 }
 
+/// 构造 modalities JSON 块。
+///
+/// - `None` 或 input/output 都为空的 modalities → 返回 `None`(由 caller 决定是否写入 `modalities` 键)
+/// - 非空时,只输出非空数组(避免写入 `"input": []`)
+fn build_modalities_value(m: &Option<Modalities>) -> Option<Value> {
+    let m = m.as_ref()?;
+    if m.input.is_empty() && m.output.is_empty() {
+        return None;
+    }
+    let mut obj = Map::new();
+    if !m.input.is_empty() {
+        obj.insert(
+            "input".to_string(),
+            Value::Array(m.input.iter().map(|s| Value::String(s.clone())).collect()),
+        );
+    }
+    if !m.output.is_empty() {
+        obj.insert(
+            "output".to_string(),
+            Value::Array(m.output.iter().map(|s| Value::String(s.clone())).collect()),
+        );
+    }
+    Some(Value::Object(obj))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,6 +185,7 @@ mod tests {
             ModelEntry {
                 name: model_name.to_string(),
                 group: group.map(|s| s.to_string()),
+                modalities: None,
             },
         );
         ConfigPayload {
@@ -167,6 +196,40 @@ mod tests {
                 options: ProviderOptions {
                     api_key: api_key.to_string(),
                     base_url: base_url.to_string(),
+                },
+                models,
+            },
+            agents: HashMap::new(),
+            categories: HashMap::new(),
+            source: None,
+        }
+    }
+
+    fn payload_with_modalities(
+        model_id: &str,
+        input: Vec<&str>,
+        output: Vec<&str>,
+    ) -> ConfigPayload {
+        let mut models = HashMap::new();
+        models.insert(
+            model_id.to_string(),
+            ModelEntry {
+                name: format!("{}-name", model_id),
+                group: None,
+                modalities: Some(Modalities {
+                    input: input.iter().map(|s| s.to_string()).collect(),
+                    output: output.iter().map(|s| s.to_string()).collect(),
+                }),
+            },
+        );
+        ConfigPayload {
+            label: "test-payload".to_string(),
+            provider: ConfigProvider {
+                name: "OpenAI".to_string(),
+                npm: "@ai-sdk/openai".to_string(),
+                options: ProviderOptions {
+                    api_key: "k".to_string(),
+                    base_url: "u".to_string(),
                 },
                 models,
             },
@@ -459,8 +522,8 @@ mod tests {
     #[test]
     fn test_build_oh_my_openagent_normalizes_case_via_provider_models() {
         let mut models = HashMap::new();
-        models.insert("MiniMax-M3".to_string(), ModelEntry { name: "MiniMax M3".to_string(), group: None });
-        models.insert("deepseek-v4-flash".to_string(), ModelEntry { name: "DeepSeek V4 Flash".to_string(), group: None });
+        models.insert("MiniMax-M3".to_string(), ModelEntry { name: "MiniMax M3".to_string(), group: None, modalities: None });
+        models.insert("deepseek-v4-flash".to_string(), ModelEntry { name: "DeepSeek V4 Flash".to_string(), group: None, modalities: None });
 
         let mut agents = HashMap::new();
         agents.insert("multimodal-looker".to_string(), "omos/MiniMax-m3".to_string());
@@ -488,7 +551,7 @@ mod tests {
     #[test]
     fn test_build_oh_my_openagent_unknown_model_keeps_original() {
         let mut models = HashMap::new();
-        models.insert("deepseek-v4-flash".to_string(), ModelEntry { name: "DeepSeek V4 Flash".to_string(), group: None });
+        models.insert("deepseek-v4-flash".to_string(), ModelEntry { name: "DeepSeek V4 Flash".to_string(), group: None, modalities: None });
 
         let mut agents = HashMap::new();
         agents.insert("coder".to_string(), "omos/MiniMax-m3".to_string());
@@ -508,5 +571,67 @@ mod tests {
         let v = build_oh_my_openagent(&payload);
 
         assert_eq!(v["agents"]["coder"]["model"], "omos/MiniMax-m3", "未知 model 应保持原样（让用户去修）");
+    }
+
+    // ---------- modalities: 同时有 input + output ----------
+    #[test]
+    fn test_merge_writes_modalities() {
+        let mut target = json!({"provider": {"omos": {"name": "x", "npm": "x", "options": {}, "models": {}}}});
+        let source = payload_with_modalities(
+            "MiniMax-M3",
+            vec!["text", "image"],
+            vec!["text"],
+        );
+
+        merge_opencode(&mut target, &source).unwrap();
+
+        let model = &target["provider"]["omos"]["models"]["MiniMax-M3"];
+        assert_eq!(model["name"], "MiniMax-M3-name");
+        assert_eq!(model["modalities"]["input"][0], "text");
+        assert_eq!(model["modalities"]["input"][1], "image");
+        assert_eq!(model["modalities"]["output"][0], "text");
+    }
+
+    // ---------- modalities: 仅 input,不输出 output 字段 ----------
+    #[test]
+    fn test_merge_modalities_input_only() {
+        let mut target = json!({"provider": {"omos": {"name": "x", "npm": "x", "options": {}, "models": {}}}});
+        let source = payload_with_modalities("m", vec!["text"], vec![]);
+
+        merge_opencode(&mut target, &source).unwrap();
+
+        let m = &target["provider"]["omos"]["models"]["m"]["modalities"];
+        assert!(m.get("input").is_some());
+        assert!(m.get("output").is_none(), "output 为空时不应输出空数组");
+    }
+
+    // ---------- modalities: 都为空时不写 modalities 字段 ----------
+    #[test]
+    fn test_merge_modalities_all_empty_no_field() {
+        let mut target = json!({"provider": {"omos": {"name": "x", "npm": "x", "options": {}, "models": {}}}});
+        let source = payload_with_modalities("m", vec![], vec![]);
+
+        merge_opencode(&mut target, &source).unwrap();
+
+        let model = &target["provider"]["omos"]["models"]["m"];
+        assert!(
+            model.get("modalities").is_none(),
+            "input/output 都为空时不应写入 modalities 字段"
+        );
+    }
+
+    // ---------- modalities: None 时不写 modalities 字段(向后兼容) ----------
+    #[test]
+    fn test_merge_modalities_none_no_field() {
+        let mut target = json!({"provider": {"omos": {"name": "x", "npm": "x", "options": {}, "models": {}}}});
+        let source = payload_with_one_model("OpenAI", "@ai-sdk/openai", "k", "u", "m", "m-name", None);
+
+        merge_opencode(&mut target, &source).unwrap();
+
+        let model = &target["provider"]["omos"]["models"]["m"];
+        assert!(
+            model.get("modalities").is_none(),
+            "modalities 为 None 时(默认行为)不应写入字段,保证旧配置 JSON 完全一致"
+        );
     }
 }

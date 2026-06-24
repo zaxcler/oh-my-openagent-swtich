@@ -188,6 +188,7 @@ fn make_provider_payload(label: &str, api_key: &str, base_url: &str) -> ConfigPa
         ModelEntry {
             name: "gpt-4o".to_string(),
             group: Some("chat".to_string()),
+            modalities: None,
         },
     );
     let mut agents = HashMap::new();
